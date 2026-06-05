@@ -22,8 +22,9 @@ func main() {
 	s := &Server{db: database}
 
 	http.HandleFunc("/endpoints", s.handleEndpoints)
+	http.HandleFunc("/webhooks/failed", s.handleFailedWebhooks)
+	http.HandleFunc("/webhooks/", s.handleWebhookActions)
 	http.HandleFunc("/webhooks", s.handleWebhooks)
-	http.HandleFunc("/webhooks/", s.handleWebhookAttempts)
 
 	log.Println("server listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -77,27 +78,52 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(webhook)
 }
 
-func (s *Server) handleWebhookAttempts(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFailedWebhooks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// URL is /webhooks/{id}/attempts
-	// r.URL.Path gives us the full path, we split it
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) != 3 || parts[2] != "attempts" {
-		http.Error(w, "use /webhooks/{id}/attempts", http.StatusBadRequest)
-		return
-	}
-
-	webhookID := parts[1]
-	attempts, err := s.db.GetAttemptsForWebhook(webhookID)
+	webhooks, err := s.db.GetFailedWebhooks()
 	if err != nil {
-		http.Error(w, "failed to fetch attempts", http.StatusInternalServerError)
+		http.Error(w, "failed to fetch", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(attempts)
+	json.NewEncoder(w).Encode(webhooks)
+}
+
+func (s *Server) handleWebhookActions(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+
+	// GET /webhooks/:id/attempts
+	if len(parts) == 3 && parts[2] == "attempts" && r.Method == http.MethodGet {
+		attempts, err := s.db.GetAttemptsForWebhook(parts[1])
+		if err != nil {
+			http.Error(w, "failed to fetch attempts", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(attempts)
+		return
+	}
+
+	// POST /webhooks/:id/replay
+	if len(parts) == 3 && parts[2] == "replay" && r.Method == http.MethodPost {
+		webhookID := parts[1]
+		err := s.db.UpdateWebhookStatus(webhookID, "pending")
+		if err != nil {
+			http.Error(w, "failed to replay", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "queued",
+			"message": "webhook reset to pending, worker will retry shortly",
+		})
+		return
+	}
+
+	http.Error(w, "unknown route", http.StatusNotFound)
 }

@@ -72,6 +72,24 @@ func (d *DB) GetAllEndpoints() ([]Endpoint, error) {
 	return endpoints, nil
 }
 
+func (d *DB) GetFailedWebhooks() ([]Webhook, error) {
+	rows, err := d.Conn.Query(
+		`SELECT id, payload, status, created_at FROM webhooks WHERE status = 'failed'`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var webhooks []Webhook
+	for rows.Next() {
+		var w Webhook
+		rows.Scan(&w.ID, &w.Payload, &w.Status, &w.CreatedAt)
+		webhooks = append(webhooks, w)
+	}
+	return webhooks, nil
+}
+
 func (d *DB) LogAttempt(webhookID, endpointID string, statusCode int, errMsg string) error {
 	_, err := d.Conn.Exec(
 		`INSERT INTO delivery_attempts (id, webhook_id, endpoint_id, status_code, error)
