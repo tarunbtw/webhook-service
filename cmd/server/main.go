@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/tarunbtw/webhook-service/internal/db"
 )
@@ -21,8 +23,12 @@ func main() {
 	if dbPath == "" {
 		dbPath = "webhook.db"
 	}
+
 	database := db.New(dbPath)
 	s := &Server{db: database}
+
+	// run worker in background goroutine
+	go runWorker(database)
 
 	http.HandleFunc("/", s.handleDashboard)
 	http.HandleFunc("/endpoints", s.handleEndpoints)
@@ -33,6 +39,87 @@ func main() {
 
 	log.Println("server listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func runWorker(database *db.DB) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	log.Println("worker started inside server process...")
+	for {
+		deliver(database, client)
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func deliver(database *db.DB, client *http.Client) {
+	webhooks, err := database.GetPendingWebhooks()
+	if err != nil {
+		log.Println("error fetching webhooks:", err)
+		return
+	}
+	if len(webhooks) == 0 {
+		return
+	}
+
+	endpoints, err := database.GetAllEndpoints()
+	if err != nil {
+		log.Println("error fetching endpoints:", err)
+		return
+	}
+	if len(endpoints) == 0 {
+		return
+	}
+
+	for _, webhook := range webhooks {
+		anyDelivered := false
+		for _, endpoint := range endpoints {
+			success := attemptDelivery(database, client, webhook, endpoint)
+			if success {
+				anyDelivered = true
+			}
+		}
+		if anyDelivered {
+			database.UpdateWebhookStatus(webhook.ID, "delivered")
+			log.Printf("webhook %s delivered\n", webhook.ID)
+		} else {
+			database.UpdateWebhookStatus(webhook.ID, "failed")
+			log.Printf("webhook %s failed\n", webhook.ID)
+		}
+	}
+}
+
+func attemptDelivery(database *db.DB, client *http.Client, webhook db.Webhook, endpoint db.Endpoint) bool {
+	var lastErr string
+	var lastStatus int
+
+	delays := []time.Duration{0, 10 * time.Second, 30 * time.Second}
+
+	for attempt, delay := range delays {
+		if delay > 0 {
+			log.Printf("retrying webhook %s to %s in %v (attempt %d)\n", webhook.ID, endpoint.URL, delay, attempt+1)
+			time.Sleep(delay)
+		}
+
+		resp, err := client.Post(endpoint.URL, "application/json", bytes.NewBufferString(webhook.Payload))
+		if err != nil {
+			lastErr = err.Error()
+			lastStatus = 0
+			log.Printf("attempt %d failed: %s\n", attempt+1, lastErr)
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			database.LogAttempt(webhook.ID, endpoint.ID, resp.StatusCode, "")
+			return true
+		}
+
+		lastStatus = resp.StatusCode
+		lastErr = "non-2xx response"
+		log.Printf("attempt %d got status %d\n", attempt+1, lastStatus)
+	}
+
+	database.LogAttempt(webhook.ID, endpoint.ID, lastStatus, lastErr)
+	return false
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
