@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "8080:8080"
+    volumes:
+      - webhook-data:/app/data
+    environment:
+      - DB_PATH=/app/data/webhook.db
+    depends_on:
+      - worker
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    volumes:
+      - webhook-data:/app/data
+    environment:
+      - DB_PATH=/app/data/webhook.db
+
+volumes:
+  webhook-data:

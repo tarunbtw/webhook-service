@@ -17,7 +17,11 @@ type Server struct {
 func main() {
 	log.SetOutput(os.Stdout)
 
-	database := db.New("webhook.db")
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "webhook.db"
+	}
+	database := db.New(dbPath)
 	s := &Server{db: database}
 
 	http.HandleFunc("/", s.handleDashboard)

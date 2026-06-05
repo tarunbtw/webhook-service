@@ -13,7 +13,11 @@ import (
 func main() {
 	log.SetOutput(os.Stdout)
 
-	database := db.New("webhook.db")
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "webhook.db"
+	}
+	database := db.New(dbPath)
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	log.Println("worker started, watching for pending webhooks...")
