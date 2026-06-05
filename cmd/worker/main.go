@@ -41,22 +41,26 @@ func deliver(database *db.DB, client *http.Client) {
 		return
 	}
 
+	if len(endpoints) == 0 {
+		return
+	}
+
 	for _, webhook := range webhooks {
-		allDelivered := true
+		anyDelivered := false
 
 		for _, endpoint := range endpoints {
 			success := attemptDelivery(database, client, webhook, endpoint)
-			if !success {
-				allDelivered = false
+			if success {
+				anyDelivered = true
 			}
 		}
 
-		if allDelivered {
+		if anyDelivered {
 			database.UpdateWebhookStatus(webhook.ID, "delivered")
-			log.Printf("webhook %s delivered to all endpoints\n", webhook.ID)
+			log.Printf("webhook %s delivered\n", webhook.ID)
 		} else {
 			database.UpdateWebhookStatus(webhook.ID, "failed")
-			log.Printf("webhook %s failed delivery\n", webhook.ID)
+			log.Printf("webhook %s failed\n", webhook.ID)
 		}
 	}
 }

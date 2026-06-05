@@ -18,10 +18,11 @@ func main() {
 	log.SetOutput(os.Stdout)
 
 	database := db.New("webhook.db")
-
 	s := &Server{db: database}
 
+	http.HandleFunc("/", s.handleDashboard)
 	http.HandleFunc("/endpoints", s.handleEndpoints)
+	http.HandleFunc("/webhooks/all", s.handleAllWebhooks)
 	http.HandleFunc("/webhooks/failed", s.handleFailedWebhooks)
 	http.HandleFunc("/webhooks/", s.handleWebhookActions)
 	http.HandleFunc("/webhooks", s.handleWebhooks)
@@ -30,7 +31,26 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, "dashboard.html")
+}
+
 func (s *Server) handleEndpoints(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		endpoints, err := s.db.GetAllEndpoints()
+		if err != nil {
+			http.Error(w, "failed to fetch", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(endpoints)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -78,6 +98,20 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(webhook)
 }
 
+func (s *Server) handleAllWebhooks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	webhooks, err := s.db.GetAllWebhooks()
+	if err != nil {
+		http.Error(w, "failed to fetch", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(webhooks)
+}
+
 func (s *Server) handleFailedWebhooks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -97,7 +131,6 @@ func (s *Server) handleFailedWebhooks(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWebhookActions(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 
-	// GET /webhooks/:id/attempts
 	if len(parts) == 3 && parts[2] == "attempts" && r.Method == http.MethodGet {
 		attempts, err := s.db.GetAttemptsForWebhook(parts[1])
 		if err != nil {
@@ -109,10 +142,8 @@ func (s *Server) handleWebhookActions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// POST /webhooks/:id/replay
 	if len(parts) == 3 && parts[2] == "replay" && r.Method == http.MethodPost {
-		webhookID := parts[1]
-		err := s.db.UpdateWebhookStatus(webhookID, "pending")
+		err := s.db.UpdateWebhookStatus(parts[1], "pending")
 		if err != nil {
 			http.Error(w, "failed to replay", http.StatusInternalServerError)
 			return

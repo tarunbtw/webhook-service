@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Webhook Delivery Service</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: monospace;
+        background: #0f0f0f;
+        color: #e0e0e0;
+        padding: 2rem;
+      }
+      h1 {
+        color: #fff;
+        font-size: 1.2rem;
+        margin-bottom: 0.3rem;
+      }
+      .subtitle {
+        color: #666;
+        font-size: 0.8rem;
+        margin-bottom: 2rem;
+      }
+      h2 {
+        font-size: 0.9rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 1rem;
+      }
+      .section {
+        margin-bottom: 2.5rem;
+      }
+      .card {
+        background: #1a1a1a;
+        border: 1px solid #2a2a2a;
+        border-radius: 6px;
+        padding: 1rem;
+        margin-bottom: 0.5rem;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+      .badge {
+        font-size: 0.7rem;
+        padding: 2px 8px;
+        border-radius: 99px;
+        font-weight: bold;
+      }
+      .pending {
+        background: #2a2200;
+        color: #f0a500;
+      }
+      .delivered {
+        background: #0a2a0a;
+        color: #4caf50;
+      }
+      .failed {
+        background: #2a0a0a;
+        color: #f44336;
+      }
+      .id {
+        color: #555;
+        font-size: 0.75rem;
+      }
+      .url {
+        color: #7eb8f7;
+        font-size: 0.85rem;
+      }
+      .payload {
+        color: #aaa;
+        font-size: 0.8rem;
+        margin-top: 0.4rem;
+        word-break: break-all;
+      }
+      button {
+        background: #222;
+        border: 1px solid #444;
+        color: #ccc;
+        padding: 4px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-family: monospace;
+        font-size: 0.8rem;
+      }
+      button:hover {
+        background: #333;
+      }
+      button.replay {
+        border-color: #f0a500;
+        color: #f0a500;
+      }
+      button.replay:hover {
+        background: #2a2200;
+      }
+      .attempts {
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid #2a2a2a;
+        display: none;
+      }
+      .attempt-row {
+        font-size: 0.78rem;
+        color: #777;
+        margin-bottom: 0.3rem;
+      }
+      .attempt-row span {
+        margin-right: 1rem;
+      }
+      .ok {
+        color: #4caf50;
+      }
+      .err {
+        color: #f44336;
+      }
+      input {
+        background: #1a1a1a;
+        border: 1px solid #333;
+        color: #e0e0e0;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 0.85rem;
+        width: 320px;
+      }
+      .send-row {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+      }
+      textarea {
+        background: #1a1a1a;
+        border: 1px solid #333;
+        color: #e0e0e0;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 0.8rem;
+        width: 100%;
+        min-height: 60px;
+        resize: vertical;
+      }
+      .empty {
+        color: #444;
+        font-size: 0.85rem;
+        padding: 0.5rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>⚡ Webhook Delivery Service</h1>
+    <p class="subtitle">store → queue → deliver → retry</p>
+
+    <div class="section">
+      <h2>Register Endpoint</h2>
+      <div class="send-row">
+        <input
+          id="ep-url"
+          type="text"
+          placeholder="https://your-server.com/webhook"
+        />
+        <button onclick="registerEndpoint()">Register</button>
+      </div>
+      <div id="endpoints-list"></div>
+    </div>
+
+    <div class="section">
+      <h2>Send Webhook</h2>
+      <div class="send-row">
+        <textarea id="wh-payload">
+{"event": "form.submitted", "name": "tarun"}</textarea
+        >
+      </div>
+      <button onclick="sendWebhook()">Send Webhook</button>
+    </div>
+
+    <div class="section">
+      <h2>Webhooks</h2>
+      <button onclick="loadWebhooks()" style="margin-bottom: 1rem">
+        ↻ Refresh
+      </button>
+      <div id="webhooks-list"></div>
+    </div>
+
+    <script>
+      async function registerEndpoint() {
+        const url = document.getElementById("ep-url").value.trim();
+        if (!url) return;
+        await fetch("/endpoints", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        document.getElementById("ep-url").value = "";
+        loadEndpoints();
+      }
+
+      async function loadEndpoints() {
+        const res = await fetch("/endpoints");
+        const data = await res.json();
+        const el = document.getElementById("endpoints-list");
+        if (!data || data.length === 0) {
+          el.innerHTML = '<div class="empty">No endpoints registered</div>';
+          return;
+        }
+        el.innerHTML = data
+          .map(
+            (e) => `
+    <div class="card">
+      <div class="row">
+        <span class="url">${e.URL}</span>
+        <span class="id">${e.ID}</span>
+      </div>
+    </div>
+  `,
+          )
+          .join("");
+      }
+
+      async function sendWebhook() {
+        const raw = document.getElementById("wh-payload").value.trim();
+        let body;
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          alert("Invalid JSON");
+          return;
+        }
+        await fetch("/webhooks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        setTimeout(loadWebhooks, 300);
+      }
+
+      async function loadWebhooks() {
+        const res = await fetch("/webhooks/all");
+        const data = await res.json();
+        const el = document.getElementById("webhooks-list");
+        if (!data || data.length === 0) {
+          el.innerHTML = '<div class="empty">No webhooks yet</div>';
+          return;
+        }
+        el.innerHTML = data
+          .map(
+            (w) => `
+    <div class="card">
+      <div class="row">
+        <span class="badge ${w.Status}">${w.Status}</span>
+        <span class="id">${w.ID}</span>
+        <button onclick="toggleAttempts('${w.ID}')">attempts</button>
+        ${w.Status === "failed" ? `<button class="replay" onclick="replay('${w.ID}')">↺ replay</button>` : ""}
+      </div>
+      <div class="payload">${w.Payload}</div>
+      <div class="attempts" id="attempts-${w.ID}"></div>
+    </div>
+  `,
+          )
+          .join("");
+      }
+
+      async function toggleAttempts(id) {
+        const el = document.getElementById("attempts-" + id);
+        if (el.style.display === "block") {
+          el.style.display = "none";
+          return;
+        }
+        const res = await fetch("/webhooks/" + id + "/attempts");
+        const data = await res.json();
+        if (!data || data.length === 0) {
+          el.innerHTML = '<div class="empty">No attempts logged</div>';
+        } else {
+          el.innerHTML = data
+            .map(
+              (a) => `
+      <div class="attempt-row">
+        <span>${new Date(a.AttemptedAt).toLocaleTimeString()}</span>
+        <span class="${a.StatusCode >= 200 && a.StatusCode < 300 ? "ok" : "err"}">${a.StatusCode || "ERR"}</span>
+        <span>${a.Error || "ok"}</span>
+      </div>
+    `,
+            )
+            .join("");
+        }
+        el.style.display = "block";
+      }
+
+      async function replay(id) {
+        await fetch("/webhooks/" + id + "/replay", { method: "POST" });
+        setTimeout(loadWebhooks, 500);
+      }
+
+      loadEndpoints();
+      loadWebhooks();
+    </script>
+  </body>
+</html>
